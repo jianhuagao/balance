@@ -221,18 +221,45 @@ export default function ReconcilePage() {
       {/* 选择平账账户 */}
       {accounts.length > 0 && (
         <div className="space-y-5">
-          <select
-            className="w-full rounded border border-gray-300 px-3 py-2"
-            value={balanceId}
-            onChange={(e) => setBalanceId(e.target.value)}
-          >
-            <option value="">请选择平账账户</option>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+          <div className=" w-full max-w-xs">
+            <label
+              htmlFor="headline"
+              className="mb-1.5 text-sm font-medium text-gray-800 dark:text-white"
+            >
+              平账账户
+            </label>
+            <div className="relative">
+              <select
+                id="headline"
+                name="headline"
+                value={balanceId}
+                onChange={(e) => setBalanceId(e.target.value)}
+                className="peer block w-full cursor-pointer list-none appearance-none rounded-xl border border-gray-200/10 bg-white/60 px-4 py-2 pr-10 text-sm text-gray-900 placeholder-gray-500 shadow-xl ring-1 ring-gray-200/10 backdrop-blur-lg backdrop-saturate-200 outline-none focus:outline-none dark:bg-black/50 dark:text-white dark:placeholder-white/50 dark:shadow-white/5 dark:ring-white/10"
+              >
+                {accounts.map((a) => (
+                  <option className="dark:bg-black" key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+
+              {/* 下拉箭头 */}
+
+              <span className="pointer-events-none absolute top-1/2 right-3 ml-2 -translate-y-1/2 text-gray-500 dark:text-white/60">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M11.475 14.475L7.85 10.85q-.075-.075-.112-.162T7.7 10.5q0-.2.138-.35T8.2 10h7.6q.225 0 .363.15t.137.35q0 .05-.15.35l-3.625 3.625q-.125.125-.25.175T12 14.7t-.275-.05t-.25-.175"
+                  />
+                </svg>
+              </span>
+            </div>
+          </div>
 
           <button
             onClick={reconcile}
