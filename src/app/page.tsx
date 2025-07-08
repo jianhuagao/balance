@@ -272,125 +272,141 @@ export default function ReconcilePage() {
       )}
 
       {/* 平账结果 */}
-      {results.length > 0 && (
-        <div className="group animate-border rounded-lg bg-gradient-to-r from-pink-400 via-sky-400 to-yellow-400 bg-[length:_400%_400%] p-[3px] text-slate-900 [animation-duration:_10s]">
-          <div className="grid gap-y-1 rounded-md bg-slate-100/90 p-3 transition-all group-hover:bg-slate-100/95">
-            <div className="p-4 bg-white text-gray-900 rounded shadow">
-              <h2 className="font-bold mb-2">平账结果</h2>
-              {results.map((r, i) => (
-                <p key={i} className="text-sm mt-1">
-                  {r}
-                </p>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {open && (
-        <div
-          className="fixed inset-0 z-50 grid place-content-center bg-black/50 p-4 backdrop-blur-lg"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="addAcc"
-        >
-          <div className="w-full max-w-md rounded-3xl border border-transparent bg-white p-6 shadow-lg dark:border-white/20 dark:bg-black dark:text-white">
-            <div className="flex items-start justify-between">
-              <h2
-                id="addAcc"
-                className="text-xl font-bold text-gray-900 sm:text-2xl dark:text-white"
-              >
-                添加账户
-              </h2>
-
-              <button
-                onClick={() => {
-                  setOpen(false);
-                }}
-                type="button"
-                className="-me-4 -mt-4 cursor-pointer rounded-full p-2 text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600 focus:outline-none dark:hover:bg-white/20 dark:hover:text-white"
-                aria-label="Close"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="size-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            <div className="mt-4 text-pretty text-gray-700 dark:text-white/70">
-              <div className="my-2 min-w-[388px]">
-                {/* 添加新账户 */}
-                <div className="flex flex-col gap-2">
-                  <p>账户名</p>
-                  <input
-                    className={inputClassNames}
-                    placeholder="账户名"
-                    value={temp.name}
-                    onChange={(e) => setTemp({ ...temp, name: e.target.value })}
-                  />
-                  <p>软件余额</p>
-                  <input
-                    className={inputClassNames}
-                    placeholder="软件余额"
-                    type="number"
-                    value={temp.software}
-                    onChange={(e) =>
-                      setTemp({
-                        ...temp,
-                        software: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                  />
-                  <p>实际余额</p>
-                  <input
-                    className={inputClassNames}
-                    placeholder="实际余额"
-                    type="number"
-                    value={temp.actual}
-                    onChange={(e) =>
-                      setTemp({
-                        ...temp,
-                        actual: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                  />
-                </div>
+      <AnimatePresence>
+        {results.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, scale: 0.5, padding: 0 }}
+            animate={{ opacity: 1, height: "auto", scale: 1, padding: 3 }}
+            exit={{ opacity: 0, height: 0, scale: 0.5, padding: 0 }}
+            transition={{ type: "spring" }}
+            className="group animate-border rounded-lg bg-gradient-to-r from-pink-400 via-sky-400 to-yellow-400 bg-[length:_400%_400%] text-slate-900 [animation-duration:_10s]"
+          >
+            <div className="grid gap-y-1 rounded-md bg-slate-100/90 p-3 transition-all group-hover:bg-slate-100/95">
+              <div className="p-4 bg-white text-gray-900 rounded shadow">
+                <h2 className="font-bold mb-2">平账结果</h2>
+                {results.map((r, i) => (
+                  <p key={i} className="text-sm mt-1">
+                    {r}
+                  </p>
+                ))}
               </div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-            <footer className="mt-6 flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setOpen(false);
-                }}
-                className="group relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-white/60 px-4 py-2 text-sm text-yellow-800 ring-1 shadow-black/10 ring-gray-300/50 backdrop-blur-md transition-all duration-300 hover:shadow-lg dark:bg-[rgba(255,255,255,0.15)] dark:text-white dark:shadow dark:shadow-white/10 dark:ring-white/20 dark:hover:ring-white/50"
-              >
-                <span className="relative z-10">取消</span>
-                <span className="pointer-events-none absolute right-2 bottom-2 z-0 size-5 rounded-full bg-yellow-300/50 blur-[6px] transition-transform duration-300 ease-in-out group-hover:translate-1/2 dark:bg-yellow-300/30"></span>
-              </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, scale: 0.5 }}
+            animate={{ opacity: 1, height: "auto", scale: 1 }}
+            exit={{ opacity: 0, height: 0, scale: 0.5 }}
+            transition={{ type: "spring" }}
+            className="fixed inset-0 z-50 grid place-content-center bg-black/50 p-4 backdrop-blur-lg"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="addAcc"
+          >
+            <div className="w-full max-w-md rounded-3xl border border-transparent bg-white p-6 shadow-lg dark:border-white/20 dark:bg-black dark:text-white">
+              <div className="flex items-start justify-between">
+                <h2
+                  id="addAcc"
+                  className="text-xl font-bold text-gray-900 sm:text-2xl dark:text-white"
+                >
+                  添加账户
+                </h2>
 
-              <button
-                onClick={handleAdd}
-                className="group relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-white/60 px-4 py-2 text-sm text-purple-800 ring-1 shadow-black/10 ring-gray-300/50 backdrop-blur-md transition-all duration-300 hover:shadow-lg dark:bg-[rgba(255,255,255,0.15)] dark:text-white dark:shadow dark:shadow-white/10 dark:ring-white/20 dark:hover:ring-white/50"
-              >
-                <span className="relative z-10">添加账户</span>
-                <span className="pointer-events-none absolute right-2 bottom-2 z-0 size-5 rounded-full bg-purple-400/50 blur-[6px] transition-transform duration-300 ease-in-out group-hover:translate-1/2 dark:bg-purple-400/40"></span>
-              </button>
-            </footer>
-          </div>
-        </div>
-      )}
+                <button
+                  onClick={() => {
+                    setOpen(false);
+                  }}
+                  type="button"
+                  className="-me-4 -mt-4 cursor-pointer rounded-full p-2 text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600 focus:outline-none dark:hover:bg-white/20 dark:hover:text-white"
+                  aria-label="Close"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="size-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="mt-4 text-pretty text-gray-700 dark:text-white/70">
+                <div className="my-2 min-w-[388px]">
+                  {/* 添加新账户 */}
+                  <div className="flex flex-col gap-2">
+                    <p>账户名</p>
+                    <input
+                      className={inputClassNames}
+                      placeholder="账户名"
+                      value={temp.name}
+                      onChange={(e) =>
+                        setTemp({ ...temp, name: e.target.value })
+                      }
+                    />
+                    <p>软件余额</p>
+                    <input
+                      className={inputClassNames}
+                      placeholder="软件余额"
+                      type="number"
+                      value={temp.software}
+                      onChange={(e) =>
+                        setTemp({
+                          ...temp,
+                          software: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                    <p>实际余额</p>
+                    <input
+                      className={inputClassNames}
+                      placeholder="实际余额"
+                      type="number"
+                      value={temp.actual}
+                      onChange={(e) =>
+                        setTemp({
+                          ...temp,
+                          actual: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <footer className="mt-6 flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setOpen(false);
+                  }}
+                  className="group relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-white/60 px-4 py-2 text-sm text-yellow-800 ring-1 shadow-black/10 ring-gray-300/50 backdrop-blur-md transition-all duration-300 hover:shadow-lg dark:bg-[rgba(255,255,255,0.15)] dark:text-white dark:shadow dark:shadow-white/10 dark:ring-white/20 dark:hover:ring-white/50"
+                >
+                  <span className="relative z-10">取消</span>
+                  <span className="pointer-events-none absolute right-2 bottom-2 z-0 size-5 rounded-full bg-yellow-300/50 blur-[6px] transition-transform duration-300 ease-in-out group-hover:translate-1/2 dark:bg-yellow-300/30"></span>
+                </button>
+
+                <button
+                  onClick={handleAdd}
+                  className="group relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-white/60 px-4 py-2 text-sm text-purple-800 ring-1 shadow-black/10 ring-gray-300/50 backdrop-blur-md transition-all duration-300 hover:shadow-lg dark:bg-[rgba(255,255,255,0.15)] dark:text-white dark:shadow dark:shadow-white/10 dark:ring-white/20 dark:hover:ring-white/50"
+                >
+                  <span className="relative z-10">添加账户</span>
+                  <span className="pointer-events-none absolute right-2 bottom-2 z-0 size-5 rounded-full bg-purple-400/50 blur-[6px] transition-transform duration-300 ease-in-out group-hover:translate-1/2 dark:bg-purple-400/40"></span>
+                </button>
+              </footer>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
