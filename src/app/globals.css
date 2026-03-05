@@ -1,40 +1,121 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg-deep: #0a1020;
+  --text-main: #e2e8f0;
+  --font-ui: "Avenir Next", "SF Pro Display", "Segoe UI Variable", "PingFang SC", "Noto Sans CJK SC", sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  margin: 0;
+  min-height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg-deep);
+  color: var(--text-main);
+  font-family: var(--font-ui);
 }
 
-input {
-  /* 隐藏 Chrome/Safari 中的箭头 */
-  &::-webkit-outer-spin-button,
-  &::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-  }
+.glass-panel {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06));
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+  backdrop-filter: blur(22px);
+}
 
-  /* 隐藏 Firefox 中的箭头 */
-  &[type="number"] {
-    -moz-appearance: textfield;
+.metric-card {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 12px;
+}
+
+.metric-card p {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.metric-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 17px;
+  color: #f8fafc;
+  line-height: 1.2;
+}
+
+.field-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.field-wrap span {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(203, 213, 225, 0.9);
+}
+
+.field-input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 9px 12px;
+  color: #f8fafc;
+  outline: none;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.field-input::placeholder {
+  color: rgba(226, 232, 240, 0.5);
+}
+
+.field-input:focus {
+  border-color: rgba(103, 232, 249, 0.8);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translateY(0px);
   }
+  50% {
+    transform: translateY(18px);
+  }
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(16px, -20px, 0);
+  }
+}
+
+.animate-float-soft {
+  animation: float-soft 7s ease-in-out infinite;
+}
+
+.animate-float-slow {
+  animation: float-slow 11s ease-in-out infinite;
 }

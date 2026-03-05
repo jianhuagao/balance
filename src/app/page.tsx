@@ -1,12 +1,9 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
-import { init, i, id, tx } from "@instantdb/react";
-import { motion, AnimatePresence } from "framer-motion";
 
-const inputClassNames =
-  "rounded-lg border border-black/5 bg-white/40 px-3 py-1.5 text-sm/6 backdrop-blur-2xl focus:border-black/5 focus:ring-2 focus:ring-gray-50/50 focus:outline-hidden dark:text-white dark:placeholder:text-white/80 focus:dark:ring-white/50";
+import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { i, id, init, tx } from "@instantdb/react";
 
-// 定义 InstantDB schema
 const schema = i.schema({
   entities: {
     accounts: i.entity({
@@ -29,384 +26,386 @@ type Account = {
   createdAt: number;
 };
 
-export default function ReconcilePage() {
-  const [temp, setTemp] = useState<{
-    name: string;
-    software: number;
-    actual: number;
-  }>({ name: "", software: 0, actual: 0 });
-  const [balanceId, setBalanceId] = useState<string>("");
-  const [results, setResults] = useState<string[]>([]);
-  const [open, setOpen] = useState<boolean>(false);
+type Transfer = {
+  from: string;
+  to: string;
+  amount: number;
+};
 
-  // 查询远程数据，自动侦听
-  const { data } = db.useQuery({ accounts: {} });
-  const accounts: Account[] = useMemo(() => data?.accounts || [], [data]);
+const money = new Intl.NumberFormat("zh-CN", {
+  style: "currency",
+  currency: "CNY",
+  minimumFractionDigits: 2,
+});
 
-  // 首次加载，默认选中最后添加的账户
-  useEffect(() => {
-    if (accounts.length && !balanceId) {
-      setBalanceId(accounts[accounts.length - 1].id);
+const cardIn = {
+  initial: { opacity: 0, y: 18, filter: "blur(8px)" },
+  animate: { opacity: 1, y: 0, filter: "blur(0px)" },
+};
+
+function toNum(raw: string) {
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function settle(accounts: Account[]) {
+  const needers = accounts
+    .map((a) => ({ name: a.name, amount: +(a.software - a.actual).toFixed(2) }))
+    .filter((a) => a.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+
+  const payers = accounts
+    .map((a) => ({ name: a.name, amount: +((a.actual - a.software).toFixed(2)) }))
+    .filter((a) => a.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+
+  const transfers: Transfer[] = [];
+  let i = 0;
+  let j = 0;
+
+  while (i < payers.length && j < needers.length) {
+    const amt = +Math.min(payers[i].amount, needers[j].amount).toFixed(2);
+    if (amt > 0) {
+      transfers.push({ from: payers[i].name, to: needers[j].name, amount: amt });
+      payers[i].amount = +(payers[i].amount - amt).toFixed(2);
+      needers[j].amount = +(needers[j].amount - amt).toFixed(2);
     }
-  }, [accounts, balanceId]);
 
-  const handleAdd = async () => {
-    if (!temp.name.trim()) return;
+    if (payers[i].amount <= 0.0001) i += 1;
+    if (needers[j].amount <= 0.0001) j += 1;
+  }
+
+  const residualNeed = +needers.reduce((s, n) => s + Math.max(0, n.amount), 0).toFixed(2);
+  const residualPay = +payers.reduce((s, n) => s + Math.max(0, n.amount), 0).toFixed(2);
+
+  return { transfers, residualNeed, residualPay };
+}
+
+export default function ReconcilePage() {
+  const [draft, setDraft] = useState({ name: "", software: "", actual: "" });
+  const [open, setOpen] = useState(false);
+  const [highlightId, setHighlightId] = useState<string>("");
+
+  const { data } = db.useQuery({ accounts: {} });
+
+  const accounts = useMemo(
+    () =>
+      ((data?.accounts || []) as Account[])
+        .slice()
+        .sort((a, b) => b.createdAt - a.createdAt),
+    [data]
+  );
+
+  useEffect(() => {
+    if (accounts.length && !highlightId) {
+      setHighlightId(accounts[0].id);
+    }
+  }, [accounts, highlightId]);
+
+  const totals = useMemo(() => {
+    const software = accounts.reduce((s, a) => s + a.software, 0);
+    const actual = accounts.reduce((s, a) => s + a.actual, 0);
+    const gap = +(software - actual).toFixed(2);
+    return {
+      software,
+      actual,
+      gap,
+      aligned: accounts.filter((a) => Math.abs(a.software - a.actual) < 0.01).length,
+    };
+  }, [accounts]);
+
+  const settlement = useMemo(() => settle(accounts), [accounts]);
+
+  const addAccount = async () => {
+    const name = draft.name.trim();
+    if (!name) return;
     const newId = id();
     await db.transact([
       tx.accounts[newId].update({
-        name: temp.name,
-        software: temp.software,
-        actual: temp.actual,
+        name,
+        software: toNum(draft.software),
+        actual: toNum(draft.actual),
         createdAt: Date.now(),
       }),
     ]);
-    setBalanceId(newId);
-    setTemp({ name: "", software: 0, actual: 0 });
+    setDraft({ name: "", software: "", actual: "" });
+    setOpen(false);
+    setHighlightId(newId);
   };
 
-  const handleDelete = async (delId: string) => {
-    if (balanceId === delId) setBalanceId("");
-    await db.transact([tx.accounts[delId].delete()]);
+  const removeAccount = async (accountId: string) => {
+    await db.transact([tx.accounts[accountId].delete()]);
+    if (highlightId === accountId) setHighlightId("");
   };
 
-  const handleUpdate = async (
-    id: string,
+  const updateAmount = async (
+    accountId: string,
     key: "software" | "actual",
-    value: number
+    raw: string
   ) => {
-    await db.transact([tx.accounts[id].update({ [key]: value })]);
-  };
-
-  const reconcile = () => {
-    const diffs = accounts.map((a) => ({
-      ...a,
-      diff: +(a.software - a.actual).toFixed(2),
-    }));
-    const balance = accounts.find((a) => a.id === balanceId);
-    if (!balance) return;
-    const instructions: string[] = [];
-
-    diffs.forEach((d) => {
-      if (d.id === balance.id) return;
-      if (d.diff > 0) {
-        instructions.push(
-          `${d.name} 转账 ${d.diff.toFixed(2)} 元 给 ${balance.name}`
-        );
-      } else if (d.diff < 0) {
-        instructions.push(
-          `${balance.name} 转账 ${Math.abs(d.diff).toFixed(2)} 元 给 ${d.name}`
-        );
-      }
-    });
-
-    const total = diffs.reduce((acc, d) => acc + d.diff, 0);
-    if (total > 0) {
-      instructions.push(`${balance.name} 账户平账支出 ${total.toFixed(2)} 元`);
-    } else if (total < 0) {
-      instructions.push(
-        `${balance.name} 账户平账收入 ${Math.abs(total).toFixed(2)} 元`
-      );
-    } else {
-      instructions.push("无需平账，所有账户已对齐");
-    }
-
-    setResults(instructions);
+    await db.transact([tx.accounts[accountId].update({ [key]: toNum(raw) })]);
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-4 space-y-6">
-      <h1 className="text-2xl font-bold">账户平账工具</h1>
-      <button
-        onClick={() => {
-          setOpen(true);
-        }}
-        className="group relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-white/60 px-4 py-2 text-sm text-cyan-800 ring-1 shadow-black/10 ring-gray-300/50 backdrop-blur-md transition-all duration-300 hover:shadow-lg dark:bg-[rgba(255,255,255,0.15)] dark:text-white dark:shadow dark:shadow-white/10 dark:ring-white/20 dark:hover:ring-white/50"
-      >
-        <span className="relative z-10">添加账户</span>
-        <span className="pointer-events-none absolute right-2 bottom-2 z-0 size-5 rounded-full bg-cyan-400/50 blur-[6px] transition-transform duration-300 ease-in-out group-hover:translate-1/2 dark:bg-cyan-400/40"></span>
-      </button>
-      {/* 账户列表，可编辑金额 */}
-      <div>
-        <AnimatePresence>
-          {accounts.map((a) => (
-            <motion.div
-              key={a.id}
-              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-              animate={{ opacity: 1, height: "auto", marginBottom: 10 }}
-              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-              transition={{ type: "spring" }}
-              className="flex items-center gap-2"
-            >
-              <div className="relative">
-                <input
-                  value={a.name}
-                  disabled
-                  id="input1"
-                  type="text"
-                  aria-label="inputtext"
-                  name="inputtext"
-                  className="peer rounded-lg border border-black/5 bg-white/40 px-3 pt-5 pb-2 text-sm/6 backdrop-blur-2xl focus:border-black/5 focus:ring-2 focus:ring-gray-50/50 focus:outline-hidden dark:text-white dark:placeholder:text-white/80 focus:dark:ring-white/50"
-                  placeholder=""
-                />
-                <label
-                  htmlFor="input1"
-                  className="absolute top-1/2 left-3 origin-[0] -translate-y-5 scale-[.70] cursor-text text-sm opacity-50 transition-transform peer-placeholder-shown:translate-x-0 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:scale-100 peer-placeholder-shown:opacity-80 peer-focus:-translate-y-5 peer-focus:scale-[.70] peer-focus:opacity-50 dark:text-white"
-                >
-                  账户名称
-                </label>
-              </div>
-              <div className="relative">
-                <input
-                  id="input2"
-                  type="number"
-                  aria-label="inputtext"
-                  name="inputtext"
-                  className="peer rounded-lg border border-black/5 bg-white/40 px-3 pt-5 pb-2 text-sm/6 backdrop-blur-2xl focus:border-black/5 focus:ring-2 focus:ring-gray-50/50 focus:outline-hidden dark:text-white dark:placeholder:text-white/80 focus:dark:ring-white/50"
-                  placeholder=""
-                  defaultValue={a.software}
-                  onBlur={(e) =>
-                    handleUpdate(
-                      a.id,
-                      "software",
-                      parseFloat(e.target.value) || 0
-                    )
-                  }
-                />
-                <label
-                  htmlFor="input2"
-                  className="absolute top-1/2 left-3 origin-[0] -translate-y-5 scale-[.70] cursor-text text-sm opacity-50 transition-transform peer-placeholder-shown:translate-x-0 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:scale-100 peer-placeholder-shown:opacity-80 peer-focus:-translate-y-5 peer-focus:scale-[.70] peer-focus:opacity-50 dark:text-white"
-                >
-                  软件余额
-                </label>
-              </div>
+    <main className="relative min-h-screen overflow-hidden px-4 py-8 sm:px-8">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_12%,rgba(255,214,153,0.32),transparent_35%),radial-gradient(circle_at_82%_18%,rgba(131,233,210,0.34),transparent_40%),radial-gradient(circle_at_50%_80%,rgba(124,161,255,0.28),transparent_42%),linear-gradient(130deg,#0b111f_0%,#131f3a_45%,#0b1020_100%)]" />
+      <div className="pointer-events-none absolute -top-24 -right-16 h-72 w-72 rounded-full bg-white/10 blur-3xl animate-float-soft" />
+      <div className="pointer-events-none absolute bottom-10 -left-24 h-72 w-72 rounded-full bg-cyan-200/20 blur-3xl animate-float-slow" />
 
-              <div className="relative">
-                <input
-                  id="input3"
-                  type="number"
-                  aria-label="inputtext"
-                  name="inputtext"
-                  className="peer rounded-lg border border-black/5 bg-white/40 px-3 pt-5 pb-2 text-sm/6 backdrop-blur-2xl focus:border-black/5 focus:ring-2 focus:ring-gray-50/50 focus:outline-hidden dark:text-white dark:placeholder:text-white/80 focus:dark:ring-white/50"
-                  placeholder=""
-                  defaultValue={a.actual}
-                  onBlur={(e) =>
-                    handleUpdate(
-                      a.id,
-                      "actual",
-                      parseFloat(e.target.value) || 0
-                    )
-                  }
-                />
-                <label
-                  htmlFor="input3"
-                  className="absolute top-1/2 left-3 origin-[0] -translate-y-5 scale-[.70] cursor-text text-sm opacity-50 transition-transform peer-placeholder-shown:translate-x-0 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:scale-100 peer-placeholder-shown:opacity-80 peer-focus:-translate-y-5 peer-focus:scale-[.70] peer-focus:opacity-50 dark:text-white"
-                >
-                  实际余额
-                </label>
-              </div>
-
-              <button
-                onClick={() => handleDelete(a.id)}
-                className="group relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-white/60 px-4 py-2 text-sm text-red-800 ring-1 shadow-black/10 ring-gray-300/50 backdrop-blur-md transition-all duration-300 hover:shadow-lg dark:bg-[rgba(255,255,255,0.15)] dark:text-white dark:shadow dark:shadow-white/10 dark:ring-white/20 dark:hover:ring-white/50"
-              >
-                <span className="relative z-10">&emsp;删除&emsp;</span>
-                <span className="pointer-events-none absolute right-2 bottom-2 z-0 size-5 rounded-full bg-red-400/50 blur-[6px] transition-transform duration-300 ease-in-out group-hover:translate-1/2 dark:bg-red-400/40"></span>
-              </button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-
-      {/* 选择平账账户 */}
-      {accounts.length > 0 && (
-        <div className="space-y-5">
-          <div className=" w-full max-w-xs">
-            <label
-              htmlFor="headline"
-              className="mb-1.5 text-sm font-medium text-gray-800 dark:text-white"
-            >
-              平账账户
-            </label>
-            <div className="relative">
-              <select
-                id="headline"
-                name="headline"
-                value={balanceId}
-                onChange={(e) => setBalanceId(e.target.value)}
-                className="peer block w-full cursor-pointer list-none appearance-none rounded-xl border border-gray-200/10 bg-white/60 px-4 py-2 pr-10 text-sm text-gray-900 placeholder-gray-500 shadow-xl ring-1 ring-gray-200/10 backdrop-blur-lg backdrop-saturate-200 outline-none focus:outline-none dark:bg-black/50 dark:text-white dark:placeholder-white/50 dark:shadow-white/5 dark:ring-white/10"
-              >
-                {accounts.map((a) => (
-                  <option className="dark:bg-black" key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-
-              {/* 下拉箭头 */}
-
-              <span className="pointer-events-none absolute top-1/2 right-3 ml-2 -translate-y-1/2 text-gray-500 dark:text-white/60">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    fill="currentColor"
-                    d="M11.475 14.475L7.85 10.85q-.075-.075-.112-.162T7.7 10.5q0-.2.138-.35T8.2 10h7.6q.225 0 .363.15t.137.35q0 .05-.15.35l-3.625 3.625q-.125.125-.25.175T12 14.7t-.275-.05t-.25-.175"
-                  />
-                </svg>
-              </span>
+      <section className="relative mx-auto w-full max-w-6xl space-y-6">
+        <motion.header
+          {...cardIn}
+          transition={{ duration: 0.45 }}
+          className="glass-panel rounded-3xl p-6 sm:p-8"
+        >
+          <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.26em] text-slate-300/80">Balance Intelligence</p>
+              <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">高级账户平账控制台</h1>
+              <p className="mt-2 max-w-2xl text-sm text-slate-200/80">
+                自动计算最少转账路径，快速定位偏差账户，并给出外部调平建议。
+              </p>
             </div>
+            <button
+              onClick={() => setOpen(true)}
+              className="rounded-2xl border border-white/25 bg-white/12 px-5 py-2.5 text-sm font-medium text-white shadow-[0_8px_30px_rgba(0,0,0,0.25)] transition hover:bg-white/20"
+            >
+              + 新建账户
+            </button>
           </div>
 
-          <button
-            onClick={reconcile}
-            className="group relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-white/60 px-4 py-2 text-sm text-emerald-800 ring-1 shadow-black/10 ring-gray-300/50 backdrop-blur-md transition-all duration-300 hover:shadow-lg dark:bg-[rgba(255,255,255,0.15)] dark:text-white dark:shadow dark:shadow-white/10 dark:ring-white/20 dark:hover:ring-white/50"
-          >
-            <span className="relative z-10">进行平账</span>
-            <span className="pointer-events-none absolute right-2 bottom-2 z-0 size-5 rounded-full bg-emerald-400/50 blur-[6px] transition-transform duration-300 ease-in-out group-hover:translate-1/2 dark:bg-emerald-400/40"></span>
-          </button>
-        </div>
-      )}
-
-      {/* 平账结果 */}
-      <AnimatePresence>
-        {results.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, height: 0, scale: 0.5, padding: 0 }}
-            animate={{ opacity: 1, height: "auto", scale: 1, padding: 3 }}
-            exit={{ opacity: 0, height: 0, scale: 0.5, padding: 0 }}
-            transition={{ type: "spring" }}
-            className="group animate-border rounded-lg bg-gradient-to-r from-pink-400 via-sky-400 to-yellow-400 bg-[length:_400%_400%] text-slate-900 [animation-duration:_10s]"
-          >
-            <div className="grid gap-y-1 rounded-md bg-slate-100/90 p-3 transition-all group-hover:bg-slate-100/95">
-              <div className="p-4 bg-white text-gray-900 rounded shadow">
-                <h2 className="font-bold mb-2">平账结果</h2>
-                {results.map((r, i) => (
-                  <p key={i} className="text-sm mt-1">
-                    {r}
-                  </p>
-                ))}
-              </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="metric-card">
+              <p>账户数量</p>
+              <strong>{accounts.length}</strong>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <div className="metric-card">
+              <p>软件总额</p>
+              <strong>{money.format(totals.software)}</strong>
+            </div>
+            <div className="metric-card">
+              <p>实际总额</p>
+              <strong>{money.format(totals.actual)}</strong>
+            </div>
+            <div className="metric-card">
+              <p>已对齐</p>
+              <strong>
+                {totals.aligned}/{accounts.length || 0}
+              </strong>
+            </div>
+          </div>
+        </motion.header>
+
+        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <motion.section
+            {...cardIn}
+            transition={{ duration: 0.5, delay: 0.05 }}
+            className="glass-panel rounded-3xl p-5 sm:p-6"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">账户明细</h2>
+              <span className="text-xs text-slate-300">失焦自动保存</span>
+            </div>
+
+            <div className="space-y-3">
+              <AnimatePresence>
+                {accounts.map((a) => {
+                  const delta = +(a.software - a.actual).toFixed(2);
+                  const severity = Math.abs(delta);
+                  return (
+                    <motion.article
+                      key={a.id}
+                      initial={{ opacity: 0, y: 14 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className={`rounded-2xl border p-4 transition ${
+                        highlightId === a.id
+                          ? "border-cyan-200/80 bg-white/16"
+                          : "border-white/15 bg-white/8"
+                      }`}
+                      onMouseEnter={() => setHighlightId(a.id)}
+                    >
+                      <div className="grid gap-3 sm:grid-cols-[1fr_170px_170px_auto] sm:items-center">
+                        <div>
+                          <p className="text-sm font-medium text-white">{a.name}</p>
+                          <p className="mt-1 text-xs text-slate-300">
+                            偏差 {delta > 0 ? "需收" : delta < 0 ? "需付" : "已平"} {money.format(Math.abs(delta))}
+                          </p>
+                        </div>
+
+                        <label className="field-wrap">
+                          <span>软件余额</span>
+                          <input
+                            defaultValue={a.software}
+                            type="number"
+                            onBlur={(e) => updateAmount(a.id, "software", e.target.value)}
+                            className="field-input"
+                          />
+                        </label>
+
+                        <label className="field-wrap">
+                          <span>实际余额</span>
+                          <input
+                            defaultValue={a.actual}
+                            type="number"
+                            onBlur={(e) => updateAmount(a.id, "actual", e.target.value)}
+                            className="field-input"
+                          />
+                        </label>
+
+                        <button
+                          onClick={() => removeAccount(a.id)}
+                          className="rounded-xl border border-rose-300/40 bg-rose-400/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:bg-rose-400/20"
+                        >
+                          删除
+                        </button>
+                      </div>
+
+                      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className={`h-full rounded-full ${
+                            severity < 0.01
+                              ? "bg-emerald-300"
+                              : severity < 100
+                              ? "bg-amber-300"
+                              : "bg-rose-300"
+                          }`}
+                          style={{ width: `${Math.min(100, (severity / 500) * 100)}%` }}
+                        />
+                      </div>
+                    </motion.article>
+                  );
+                })}
+              </AnimatePresence>
+
+              {!accounts.length && (
+                <div className="rounded-2xl border border-dashed border-white/20 bg-white/5 p-8 text-center text-sm text-slate-300">
+                  还没有账户，先创建一个。
+                </div>
+              )}
+            </div>
+          </motion.section>
+
+          <motion.aside
+            {...cardIn}
+            transition={{ duration: 0.55, delay: 0.1 }}
+            className="glass-panel rounded-3xl p-5 sm:p-6"
+          >
+            <h2 className="text-lg font-semibold text-white">智能平账建议</h2>
+            <p className="mt-2 text-sm text-slate-300">基于净差值计算最少转账次数，优先大额对冲。</p>
+
+            <div className="mt-5 space-y-2">
+              {settlement.transfers.length ? (
+                settlement.transfers.map((t, idx) => (
+                  <div
+                    key={`${t.from}-${t.to}-${idx}`}
+                    className="rounded-xl border border-white/15 bg-white/8 px-3 py-2 text-sm text-slate-100"
+                  >
+                    <span className="font-medium">{t.from}</span> 转给 <span className="font-medium">{t.to}</span>
+                    <span className="ml-2 text-cyan-200">{money.format(t.amount)}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-xl border border-emerald-200/30 bg-emerald-300/10 px-3 py-2 text-sm text-emerald-100">
+                  暂无内部转账需求。
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-white/15 bg-black/20 p-4 text-sm text-slate-200">
+              <p className="font-medium text-white">外部调平</p>
+              <p className="mt-2">
+                {settlement.residualNeed > 0 && `需外部补入 ${money.format(settlement.residualNeed)} 才能完全平账。`}
+                {settlement.residualPay > 0 && `需外部转出 ${money.format(settlement.residualPay)} 才能完全平账。`}
+                {!settlement.residualNeed && !settlement.residualPay && "总账平衡，无需外部调整。"}
+              </p>
+              <p className="mt-2 text-xs text-slate-400">当前系统总差值：{money.format(totals.gap)}</p>
+            </div>
+          </motion.aside>
+        </div>
+      </section>
 
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, height: 0, scale: 0.5 }}
-            animate={{ opacity: 1, height: "auto", scale: 1 }}
-            exit={{ opacity: 0, height: 0, scale: 0.5 }}
-            transition={{ type: "spring" }}
-            className="fixed inset-0 z-50 grid place-content-center bg-black/50 p-4 backdrop-blur-lg"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="addAcc"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 grid place-items-center bg-[#020617]/70 px-4 backdrop-blur-md"
+            onClick={() => setOpen(false)}
           >
-            <div className="w-full max-w-md rounded-3xl border border-transparent bg-white p-6 shadow-lg dark:border-white/20 dark:bg-black dark:text-white">
-              <div className="flex items-start justify-between">
-                <h2
-                  id="addAcc"
-                  className="text-xl font-bold text-gray-900 sm:text-2xl dark:text-white"
-                >
-                  添加账户
-                </h2>
-
+            <motion.div
+              initial={{ opacity: 0, y: 30, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.95 }}
+              transition={{ type: "spring", bounce: 0.25 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg rounded-3xl border border-white/20 bg-[#0f172a]/90 p-6 shadow-2xl"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-semibold text-white">创建账户</h3>
                 <button
-                  onClick={() => {
-                    setOpen(false);
-                  }}
-                  type="button"
-                  className="-me-4 -mt-4 cursor-pointer rounded-full p-2 text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600 focus:outline-none dark:hover:bg-white/20 dark:hover:text-white"
-                  aria-label="Close"
+                  onClick={() => setOpen(false)}
+                  className="rounded-lg border border-white/20 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="size-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
+                  关闭
                 </button>
               </div>
 
-              <div className="mt-4 text-pretty text-gray-700 dark:text-white/70">
-                <div className="my-2 min-w-[388px]">
-                  {/* 添加新账户 */}
-                  <div className="flex flex-col gap-2">
-                    <p>账户名</p>
+              <div className="mt-5 grid gap-3">
+                <label className="field-wrap">
+                  <span>账户名</span>
+                  <input
+                    value={draft.name}
+                    onChange={(e) => setDraft((s) => ({ ...s, name: e.target.value }))}
+                    className="field-input"
+                    placeholder="例如：招商银行卡"
+                  />
+                </label>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="field-wrap">
+                    <span>软件余额</span>
                     <input
-                      className={inputClassNames}
-                      placeholder="账户名"
-                      value={temp.name}
-                      onChange={(e) =>
-                        setTemp({ ...temp, name: e.target.value })
-                      }
-                    />
-                    <p>软件余额</p>
-                    <input
-                      className={inputClassNames}
-                      placeholder="软件余额"
+                      value={draft.software}
+                      onChange={(e) => setDraft((s) => ({ ...s, software: e.target.value }))}
                       type="number"
-                      value={temp.software}
-                      onChange={(e) =>
-                        setTemp({
-                          ...temp,
-                          software: parseFloat(e.target.value) || 0,
-                        })
-                      }
+                      className="field-input"
+                      placeholder="0"
                     />
-                    <p>实际余额</p>
+                  </label>
+
+                  <label className="field-wrap">
+                    <span>实际余额</span>
                     <input
-                      className={inputClassNames}
-                      placeholder="实际余额"
+                      value={draft.actual}
+                      onChange={(e) => setDraft((s) => ({ ...s, actual: e.target.value }))}
                       type="number"
-                      value={temp.actual}
-                      onChange={(e) =>
-                        setTemp({
-                          ...temp,
-                          actual: parseFloat(e.target.value) || 0,
-                        })
-                      }
+                      className="field-input"
+                      placeholder="0"
                     />
-                  </div>
+                  </label>
                 </div>
               </div>
 
-              <footer className="mt-6 flex justify-end gap-2">
+              <div className="mt-6 flex justify-end gap-2">
                 <button
-                  onClick={() => {
-                    setOpen(false);
-                  }}
-                  className="group relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-white/60 px-4 py-2 text-sm text-yellow-800 ring-1 shadow-black/10 ring-gray-300/50 backdrop-blur-md transition-all duration-300 hover:shadow-lg dark:bg-[rgba(255,255,255,0.15)] dark:text-white dark:shadow dark:shadow-white/10 dark:ring-white/20 dark:hover:ring-white/50"
+                  onClick={() => setOpen(false)}
+                  className="rounded-xl border border-white/20 px-4 py-2 text-sm text-slate-200 hover:bg-white/10"
                 >
-                  <span className="relative z-10">取消</span>
-                  <span className="pointer-events-none absolute right-2 bottom-2 z-0 size-5 rounded-full bg-yellow-300/50 blur-[6px] transition-transform duration-300 ease-in-out group-hover:translate-1/2 dark:bg-yellow-300/30"></span>
+                  取消
                 </button>
-
                 <button
-                  onClick={handleAdd}
-                  className="group relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-white/60 px-4 py-2 text-sm text-purple-800 ring-1 shadow-black/10 ring-gray-300/50 backdrop-blur-md transition-all duration-300 hover:shadow-lg dark:bg-[rgba(255,255,255,0.15)] dark:text-white dark:shadow dark:shadow-white/10 dark:ring-white/20 dark:hover:ring-white/50"
+                  onClick={addAccount}
+                  className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-200"
                 >
-                  <span className="relative z-10">添加账户</span>
-                  <span className="pointer-events-none absolute right-2 bottom-2 z-0 size-5 rounded-full bg-purple-400/50 blur-[6px] transition-transform duration-300 ease-in-out group-hover:translate-1/2 dark:bg-purple-400/40"></span>
+                  创建并加入
                 </button>
-              </footer>
-            </div>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </main>
   );
 }
