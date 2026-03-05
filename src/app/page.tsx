@@ -346,34 +346,7 @@ export default function ReconcilePage() {
                   >
                     <div className="grid gap-3 sm:grid-cols-[1fr_190px_190px_88px] sm:items-end">
                       <div>
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-lg font-semibold tracking-wide text-white sm:text-xl">{a.name}</p>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setCompareId(a.id)}
-                              disabled={compareId === a.id}
-                              className={`grid h-8 w-8 place-items-center rounded-full border transition ${
-                                compareId === a.id
-                                  ? "opacity-0 pointer-events-none"
-                                  : "border-cyan-200/55 bg-cyan-300/15 text-cyan-100 hover:bg-cyan-300/30"
-                              }`}
-                              aria-label={`将${a.name}置底`}
-                            >
-                              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M6 10l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => removeAccount(a.id)}
-                              className="grid h-8 w-8 place-items-center rounded-full border border-rose-300/55 bg-rose-500/15 text-rose-100 transition hover:bg-rose-500/30"
-                              aria-label={`删除${a.name}`}
-                            >
-                              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            </button>
-                          </div>
-                        </div>
+                        <p className="text-lg font-semibold tracking-wide text-white sm:text-xl">{a.name}</p>
                         <p className="mt-2 text-sm text-slate-200">平账：{reconcileNeed >= 0 ? "+" : ""}{reconcileNeed}</p>
                       </div>
 
@@ -402,9 +375,31 @@ export default function ReconcilePage() {
                       </label>
 
                       <div className="field-wrap">
-                        <span>状态</span>
-                        <div className="flex h-[44px] items-center rounded-xl border border-white/20 bg-black/15 px-2 text-xs text-slate-200">
-                          {compareId === a.id ? "比对账户" : "普通账户"}
+                        <span>操作</span>
+                        <div className="flex h-[44px] items-center justify-center gap-2 rounded-xl border border-white/20 bg-black/15 px-2">
+                          <button
+                            onClick={() => setCompareId(a.id)}
+                            disabled={compareId === a.id}
+                            className={`grid h-7 w-7 place-items-center rounded-full border transition ${
+                              compareId === a.id
+                                ? "invisible pointer-events-none border-cyan-200/55"
+                                : "border-cyan-200/55 bg-cyan-300/15 text-cyan-100 hover:bg-cyan-300/30"
+                            }`}
+                            aria-label={`将${a.name}置底`}
+                          >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M6 10l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => removeAccount(a.id)}
+                            className="grid h-7 w-7 place-items-center rounded-full border border-rose-300/55 bg-rose-500/15 text-rose-100 transition hover:bg-rose-500/30"
+                            aria-label={`删除${a.name}`}
+                          >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -558,3 +553,4 @@ export default function ReconcilePage() {
     </main>
   );
 }
+
