@@ -27,6 +27,8 @@ type Account = {
 };
 
 type Transfer = {
+  fromId: string;
+  toId: string;
   from: string;
   to: string;
   amount: number;
@@ -48,14 +50,21 @@ function toNum(raw: string) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function settle(accounts: Account[]) {
-  const needers = accounts
-    .map((a) => ({ name: a.name, amount: +(a.software - a.actual).toFixed(2) }))
+function round2(n: number) {
+  return +n.toFixed(2);
+}
+
+function settleSoftware(accounts: Account[], compareId: string) {
+  const compareAccount = accounts.find((a) => a.id === compareId);
+  const working = accounts.filter((a) => a.id !== compareId);
+
+  const suppliers = working
+    .map((a) => ({ id: a.id, name: a.name, amount: round2(a.software - a.actual) }))
     .filter((a) => a.amount > 0)
     .sort((a, b) => b.amount - a.amount);
 
-  const payers = accounts
-    .map((a) => ({ name: a.name, amount: +((a.actual - a.software).toFixed(2)) }))
+  const receivers = working
+    .map((a) => ({ id: a.id, name: a.name, amount: round2(a.actual - a.software) }))
     .filter((a) => a.amount > 0)
     .sort((a, b) => b.amount - a.amount);
 
@@ -63,28 +72,81 @@ function settle(accounts: Account[]) {
   let i = 0;
   let j = 0;
 
-  while (i < payers.length && j < needers.length) {
-    const amt = +Math.min(payers[i].amount, needers[j].amount).toFixed(2);
+  while (i < suppliers.length && j < receivers.length) {
+    const amt = round2(Math.min(suppliers[i].amount, receivers[j].amount));
     if (amt > 0) {
-      transfers.push({ from: payers[i].name, to: needers[j].name, amount: amt });
-      payers[i].amount = +(payers[i].amount - amt).toFixed(2);
-      needers[j].amount = +(needers[j].amount - amt).toFixed(2);
+      transfers.push({
+        fromId: suppliers[i].id,
+        toId: receivers[j].id,
+        from: suppliers[i].name,
+        to: receivers[j].name,
+        amount: amt,
+      });
+      suppliers[i].amount = round2(suppliers[i].amount - amt);
+      receivers[j].amount = round2(receivers[j].amount - amt);
     }
-
-    if (payers[i].amount <= 0.0001) i += 1;
-    if (needers[j].amount <= 0.0001) j += 1;
+    if (suppliers[i].amount <= 0.0001) i += 1;
+    if (receivers[j].amount <= 0.0001) j += 1;
   }
 
-  const residualNeed = +needers.reduce((s, n) => s + Math.max(0, n.amount), 0).toFixed(2);
-  const residualPay = +payers.reduce((s, n) => s + Math.max(0, n.amount), 0).toFixed(2);
+  if (compareAccount) {
+    for (const supplier of suppliers) {
+      if (supplier.amount > 0.0001) {
+        transfers.push({
+          fromId: supplier.id,
+          toId: compareAccount.id,
+          from: supplier.name,
+          to: compareAccount.name,
+          amount: round2(supplier.amount),
+        });
+      }
+    }
 
-  return { transfers, residualNeed, residualPay };
+    for (const receiver of receivers) {
+      if (receiver.amount > 0.0001) {
+        transfers.push({
+          fromId: compareAccount.id,
+          toId: receiver.id,
+          from: compareAccount.name,
+          to: receiver.name,
+          amount: round2(receiver.amount),
+        });
+      }
+    }
+  }
+
+  let compareAfter: number | null = null;
+  let compareNeedAfter: number | null = null;
+  let compareDelta: number | null = null;
+
+  if (compareAccount) {
+    const inToCompare = transfers
+      .filter((t) => t.toId === compareAccount.id)
+      .reduce((s, t) => s + t.amount, 0);
+    const outFromCompare = transfers
+      .filter((t) => t.fromId === compareAccount.id)
+      .reduce((s, t) => s + t.amount, 0);
+
+    compareAfter = round2(compareAccount.software + inToCompare - outFromCompare);
+    compareNeedAfter = round2(compareAccount.actual - compareAfter);
+    compareDelta = round2(compareAfter - compareAccount.software);
+  }
+
+  return {
+    transfers,
+    compareAccount,
+    compareAfter,
+    compareNeedAfter,
+    compareDelta,
+  };
 }
 
 export default function ReconcilePage() {
   const [draft, setDraft] = useState({ name: "", software: "", actual: "" });
   const [open, setOpen] = useState(false);
   const [highlightId, setHighlightId] = useState<string>("");
+  const [compareId, setCompareId] = useState<string>("");
+  const [runningTransfer, setRunningTransfer] = useState<string>("");
 
   const { data } = db.useQuery({ accounts: {} });
 
@@ -102,10 +164,27 @@ export default function ReconcilePage() {
     }
   }, [accounts, highlightId]);
 
+  useEffect(() => {
+    if (!accounts.length) {
+      setCompareId("");
+      return;
+    }
+    if (!compareId || !accounts.some((a) => a.id === compareId)) {
+      setCompareId(accounts[accounts.length - 1].id);
+    }
+  }, [accounts, compareId]);
+
+  const orderedAccounts = useMemo(() => {
+    if (!compareId) return accounts;
+    const pinned = accounts.find((a) => a.id === compareId);
+    if (!pinned) return accounts;
+    return accounts.filter((a) => a.id !== compareId).concat(pinned);
+  }, [accounts, compareId]);
+
   const totals = useMemo(() => {
     const software = accounts.reduce((s, a) => s + a.software, 0);
     const actual = accounts.reduce((s, a) => s + a.actual, 0);
-    const gap = +(software - actual).toFixed(2);
+    const gap = round2(software - actual);
     return {
       software,
       actual,
@@ -114,7 +193,10 @@ export default function ReconcilePage() {
     };
   }, [accounts]);
 
-  const settlement = useMemo(() => settle(accounts), [accounts]);
+  const settlement = useMemo(
+    () => settleSoftware(accounts, compareId),
+    [accounts, compareId]
+  );
 
   const addAccount = async () => {
     const name = draft.name.trim();
@@ -146,6 +228,22 @@ export default function ReconcilePage() {
     await db.transact([tx.accounts[accountId].update({ [key]: toNum(raw) })]);
   };
 
+  const executeTransfer = async (transfer: Transfer) => {
+    const from = accounts.find((a) => a.id === transfer.fromId);
+    const to = accounts.find((a) => a.id === transfer.toId);
+    if (!from || !to) return;
+
+    const transferKey = `${transfer.fromId}-${transfer.toId}-${transfer.amount}`;
+    setRunningTransfer(transferKey);
+
+    await db.transact([
+      tx.accounts[from.id].update({ software: round2(from.software - transfer.amount) }),
+      tx.accounts[to.id].update({ software: round2(to.software + transfer.amount) }),
+    ]);
+
+    setRunningTransfer("");
+  };
+
   return (
     <main className="relative min-h-screen overflow-hidden px-4 py-8 sm:px-8">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_12%,rgba(255,214,153,0.32),transparent_35%),radial-gradient(circle_at_82%_18%,rgba(131,233,210,0.34),transparent_40%),radial-gradient(circle_at_50%_80%,rgba(124,161,255,0.28),transparent_42%),linear-gradient(130deg,#0b111f_0%,#131f3a_45%,#0b1020_100%)]" />
@@ -163,7 +261,7 @@ export default function ReconcilePage() {
               <p className="text-xs uppercase tracking-[0.26em] text-slate-300/80">Balance Intelligence</p>
               <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">高级账户平账控制台</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-200/80">
-                自动计算最少转账路径，快速定位偏差账户，并给出外部调平建议。
+                算法只调整软件余额，实际余额可随每次对账重新录入。
               </p>
             </div>
             <button
@@ -194,135 +292,186 @@ export default function ReconcilePage() {
               </strong>
             </div>
           </div>
+
+          <div className="mt-4 rounded-2xl border border-white/20 bg-black/20 p-4 text-sm text-slate-100">
+            <p className="font-medium text-white">最终比对账户结果</p>
+            <p className="mt-2">
+              {settlement.compareAccount && settlement.compareDelta !== null && settlement.compareDelta < 0 &&
+                `${settlement.compareAccount.name} 需扣除 ${money.format(Math.abs(settlement.compareDelta))}。`}
+              {settlement.compareAccount && settlement.compareDelta !== null && settlement.compareDelta > 0 &&
+                `${settlement.compareAccount.name} 需收入 ${money.format(settlement.compareDelta)}。`}
+              {settlement.compareAccount && settlement.compareDelta === 0 &&
+                `${settlement.compareAccount.name} 无需额外收支。`}
+              {!settlement.compareAccount && "请先选择一个比对账户。"}
+            </p>
+            <p className="mt-1 text-xs text-slate-300">
+              {settlement.compareAccount && settlement.compareAfter !== null && settlement.compareNeedAfter !== null &&
+                `执行建议后：软件余额 ${money.format(settlement.compareAfter)}，平账：${settlement.compareNeedAfter >= 0 ? "+" : ""}${settlement.compareNeedAfter}。`}
+            </p>
+          </div>
         </motion.header>
 
-        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <motion.section
-            {...cardIn}
-            transition={{ duration: 0.5, delay: 0.05 }}
-            className="glass-panel rounded-3xl p-5 sm:p-6"
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-white">账户明细</h2>
-              <span className="text-xs text-slate-300">失焦自动保存</span>
-            </div>
+        <motion.section
+          {...cardIn}
+          transition={{ duration: 0.5, delay: 0.05 }}
+          className="glass-panel rounded-3xl p-5 sm:p-6"
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-white">账户明细与转账执行</h2>
+            <span className="text-xs text-slate-300">设为比对账户后会自动置底</span>
+          </div>
 
-            <div className="space-y-3">
-              <AnimatePresence>
-                {accounts.map((a) => {
-                  const delta = +(a.software - a.actual).toFixed(2);
-                  const severity = Math.abs(delta);
-                  return (
-                    <motion.article
-                      key={a.id}
-                      initial={{ opacity: 0, y: 14 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className={`rounded-2xl border p-4 transition ${
-                        highlightId === a.id
-                          ? "border-cyan-200/80 bg-white/16"
-                          : "border-white/15 bg-white/8"
-                      }`}
-                      onMouseEnter={() => setHighlightId(a.id)}
-                    >
-                      <div className="grid gap-3 sm:grid-cols-[1fr_170px_170px_auto] sm:items-center">
-                        <div>
-                          <p className="text-sm font-medium text-white">{a.name}</p>
-                          <p className="mt-1 text-xs text-slate-300">
-                            偏差 {delta > 0 ? "需收" : delta < 0 ? "需付" : "已平"} {money.format(Math.abs(delta))}
-                          </p>
-                        </div>
+          <div className="space-y-3">
+            <AnimatePresence>
+              {orderedAccounts.map((a) => {
+                const reconcileNeed = round2(a.actual - a.software);
+                const severity = Math.abs(reconcileNeed);
+                const outgoing = settlement.transfers.filter((t) => t.fromId === a.id);
+                const incoming = settlement.transfers.filter((t) => t.toId === a.id);
 
-                        <label className="field-wrap">
-                          <span>软件余额</span>
-                          <input
-                            defaultValue={a.software}
-                            type="number"
-                            onBlur={(e) => updateAmount(a.id, "software", e.target.value)}
-                            className="field-input"
-                          />
-                        </label>
-
-                        <label className="field-wrap">
-                          <span>实际余额</span>
-                          <input
-                            defaultValue={a.actual}
-                            type="number"
-                            onBlur={(e) => updateAmount(a.id, "actual", e.target.value)}
-                            className="field-input"
-                          />
-                        </label>
-
-                        <button
-                          onClick={() => removeAccount(a.id)}
-                          className="rounded-xl border border-rose-300/40 bg-rose-400/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:bg-rose-400/20"
-                        >
-                          删除
-                        </button>
-                      </div>
-
-                      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                        <div
-                          className={`h-full rounded-full ${
-                            severity < 0.01
-                              ? "bg-emerald-300"
-                              : severity < 100
-                              ? "bg-amber-300"
-                              : "bg-rose-300"
-                          }`}
-                          style={{ width: `${Math.min(100, (severity / 500) * 100)}%` }}
-                        />
-                      </div>
-                    </motion.article>
-                  );
-                })}
-              </AnimatePresence>
-
-              {!accounts.length && (
-                <div className="rounded-2xl border border-dashed border-white/20 bg-white/5 p-8 text-center text-sm text-slate-300">
-                  还没有账户，先创建一个。
-                </div>
-              )}
-            </div>
-          </motion.section>
-
-          <motion.aside
-            {...cardIn}
-            transition={{ duration: 0.55, delay: 0.1 }}
-            className="glass-panel rounded-3xl p-5 sm:p-6"
-          >
-            <h2 className="text-lg font-semibold text-white">智能平账建议</h2>
-            <p className="mt-2 text-sm text-slate-300">基于净差值计算最少转账次数，优先大额对冲。</p>
-
-            <div className="mt-5 space-y-2">
-              {settlement.transfers.length ? (
-                settlement.transfers.map((t, idx) => (
-                  <div
-                    key={`${t.from}-${t.to}-${idx}`}
-                    className="rounded-xl border border-white/15 bg-white/8 px-3 py-2 text-sm text-slate-100"
+                return (
+                  <motion.article
+                    layout
+                    transition={{ type: "spring", stiffness: 420, damping: 36 }}
+                    key={a.id}
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className={`rounded-3xl border p-5 transition ${
+                      highlightId === a.id
+                        ? "border-cyan-200/80 bg-white/18"
+                        : "border-white/15 bg-white/10"
+                    } ${compareId === a.id ? "ring-2 ring-cyan-200/60" : ""}`}
+                    onMouseEnter={() => setHighlightId(a.id)}
                   >
-                    <span className="font-medium">{t.from}</span> 转给 <span className="font-medium">{t.to}</span>
-                    <span className="ml-2 text-cyan-200">{money.format(t.amount)}</span>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-xl border border-emerald-200/30 bg-emerald-300/10 px-3 py-2 text-sm text-emerald-100">
-                  暂无内部转账需求。
-                </div>
-              )}
-            </div>
+                    <div className="grid gap-3 sm:grid-cols-[1fr_190px_190px_88px] sm:items-end">
+                      <div>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-lg font-semibold tracking-wide text-white sm:text-xl">{a.name}</p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setCompareId(a.id)}
+                              disabled={compareId === a.id}
+                              className={`grid h-8 w-8 place-items-center rounded-full border transition ${
+                                compareId === a.id
+                                  ? "opacity-0 pointer-events-none"
+                                  : "border-cyan-200/55 bg-cyan-300/15 text-cyan-100 hover:bg-cyan-300/30"
+                              }`}
+                              aria-label={`将${a.name}置底`}
+                            >
+                              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M6 10l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => removeAccount(a.id)}
+                              className="grid h-8 w-8 place-items-center rounded-full border border-rose-300/55 bg-rose-500/15 text-rose-100 transition hover:bg-rose-500/30"
+                              aria-label={`删除${a.name}`}
+                            >
+                              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-sm text-slate-200">平账：{reconcileNeed >= 0 ? "+" : ""}{reconcileNeed}</p>
+                      </div>
 
-            <div className="mt-5 rounded-2xl border border-white/15 bg-black/20 p-4 text-sm text-slate-200">
-              <p className="font-medium text-white">外部调平</p>
-              <p className="mt-2">
-                {settlement.residualNeed > 0 && `需外部补入 ${money.format(settlement.residualNeed)} 才能完全平账。`}
-                {settlement.residualPay > 0 && `需外部转出 ${money.format(settlement.residualPay)} 才能完全平账。`}
-                {!settlement.residualNeed && !settlement.residualPay && "总账平衡，无需外部调整。"}
-              </p>
-              <p className="mt-2 text-xs text-slate-400">当前系统总差值：{money.format(totals.gap)}</p>
-            </div>
-          </motion.aside>
-        </div>
+                      <label className="field-wrap">
+                        <span>软件余额</span>
+                        <input
+                          key={`software-${a.id}-${a.software}`}
+                          defaultValue={a.software}
+                          type="number"
+                          onBlur={(e) => updateAmount(a.id, "software", e.target.value)}
+                          className="field-input h-[44px]"
+                          placeholder="输入软件余额"
+                        />
+                      </label>
+
+                      <label className="field-wrap">
+                        <span>实际余额</span>
+                        <input
+                          key={`actual-${a.id}-${a.actual}`}
+                          defaultValue={a.actual}
+                          type="number"
+                          onBlur={(e) => updateAmount(a.id, "actual", e.target.value)}
+                          className="field-input h-[44px]"
+                          placeholder="输入实际余额"
+                        />
+                      </label>
+
+                      <div className="field-wrap">
+                        <span>状态</span>
+                        <div className="flex h-[44px] items-center rounded-xl border border-white/20 bg-black/15 px-2 text-xs text-slate-200">
+                          {compareId === a.id ? "比对账户" : "普通账户"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className={`h-full rounded-full ${
+                          severity < 0.01
+                            ? "bg-emerald-300"
+                            : severity < 100
+                            ? "bg-amber-300"
+                            : "bg-rose-300"
+                        }`}
+                        style={{ width: `${Math.min(100, (severity / 500) * 100)}%` }}
+                      />
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {outgoing.map((t, idx) => {
+                        const transferKey = `${t.fromId}-${t.toId}-${t.amount}`;
+                        const busy = runningTransfer === transferKey;
+                        return (
+                          <div
+                            key={`${transferKey}-${idx}`}
+                            className="flex flex-col gap-2 rounded-xl border border-cyan-200/25 bg-cyan-300/10 px-3 py-2 text-sm text-cyan-50 sm:flex-row sm:items-center sm:justify-between"
+                          >
+                            <span>
+                              需给 {t.to} 转账 {money.format(t.amount)}
+                            </span>
+                            <button
+                              onClick={() => executeTransfer(t)}
+                              disabled={busy}
+                              className="rounded-lg bg-cyan-200 px-3 py-1.5 text-xs font-medium text-slate-900 transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {busy ? "处理中..." : "标记已转账"}
+                            </button>
+                          </div>
+                        );
+                      })}
+
+                      {incoming.map((t, idx) => (
+                        <div
+                          key={`${t.fromId}-${t.toId}-${idx}-in`}
+                          className="rounded-xl border border-emerald-200/20 bg-emerald-300/10 px-3 py-2 text-sm text-emerald-50"
+                        >
+                          预计接收 {t.from} 转入 {money.format(t.amount)}
+                        </div>
+                      ))}
+
+                      {!outgoing.length && !incoming.length && (
+                        <div className="rounded-xl border border-white/15 bg-white/6 px-3 py-2 text-sm text-slate-300">
+                          当前账户暂无转账动作。
+                        </div>
+                      )}
+                    </div>
+                  </motion.article>
+                );
+              })}
+            </AnimatePresence>
+
+            {!accounts.length && (
+              <div className="rounded-2xl border border-dashed border-white/20 bg-white/5 p-8 text-center text-sm text-slate-300">
+                还没有账户，先创建一个。
+              </div>
+            )}
+          </div>
+        </motion.section>
       </section>
 
       <AnimatePresence>
